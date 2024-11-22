@@ -29,7 +29,7 @@ module Bitcoin
   autoload :Script,     'bitcoin/script'
   autoload :VERSION,    'bitcoin/version'
   autoload :Key,        'bitcoin/key'
-  autoload :PKeyEC,        'bitcoin/pkey_ec'
+  autoload :PKeyEC,     'bitcoin/pkey_ec'
   autoload :ExtKey,     'bitcoin/ext_key'
   autoload :ExtPubkey,  'bitcoin/ext_key'
   autoload :Builder,    'bitcoin/builder'
@@ -443,6 +443,7 @@ module Bitcoin
       return false unless valid_address?(address)
       return false unless signature
       return false unless signature.bytesize == 65
+
       hash = bitcoin_signed_message_hash(message)
       pubkey = OpenSSL_EC.recover_compact(hash, signature)
       pubkey_to_address(pubkey) == address if pubkey
