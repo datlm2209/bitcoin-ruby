@@ -48,7 +48,7 @@ module Bitcoin
 
     # Generate new priv/pub key.
     def generate
-      @key.generate_key
+      @key = Bitcoin::PKeyEC.generate_key
     end
 
     # Get the private key (in hex).
@@ -155,7 +155,7 @@ module Bitcoin
 
       version = signature.unpack('C')[0]
       return nil if version < 27 or version > 34
- 
+
       compressed = (version >= 31) ? (version -= 4; true) : false
 
       hash = Bitcoin.bitcoin_signed_message_hash(data)
@@ -183,7 +183,7 @@ module Bitcoin
       addresshash = Digest::SHA256.digest( Digest::SHA256.digest( self.addr ) )[0...4]
 
       require 'scrypt' unless defined?(::SCrypt::Engine)
-      buf = SCrypt::Engine.__sc_crypt(passphrase, addresshash, 16384, 8, 8, 64)
+      buf = SCrypt::Engine.scrypt(passphrase, addresshash, 16384, 8, 8, 64)
       derivedhalf1, derivedhalf2 = buf[0...32], buf[32..-1]
 
       aes = proc{|k,a,b|
@@ -212,7 +212,7 @@ module Bitcoin
       raise "Invalid checksum"  unless Digest::SHA256.digest(Digest::SHA256.digest(version + flagbyte + addresshash + encryptedhalf1 + encryptedhalf2))[0...4] == checksum
 
       require 'scrypt' unless defined?(::SCrypt::Engine)
-      buf = SCrypt::Engine.__sc_crypt(passphrase, addresshash, 16384, 8, 8, 64)
+      buf = SCrypt::Engine.scrypt(passphrase, addresshash, 16384, 8, 8, 64)
       derivedhalf1, derivedhalf2 = buf[0...32], buf[32..-1]
 
       aes = proc{|k,a|
@@ -277,4 +277,3 @@ module Bitcoin
   end
 
 end
-

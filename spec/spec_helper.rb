@@ -6,6 +6,7 @@ require_relative '../lib/bitcoin'
 require 'json'
 # Code coverage generation
 require 'simplecov'
+require 'debug'
 
 SimpleCov.start do
   add_group('Bitcoin') do |file|
