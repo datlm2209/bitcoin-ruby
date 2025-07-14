@@ -130,10 +130,10 @@ module Bitcoin
 
       group = OpenSSL::PKey::EC::Group.new('secp256k1')
       private_key_bn = OpenSSL::BN.new(private_key_hex, 16)
-      
+
       # Generate public key point by multiplying generator with private key
       public_key_point = group.generator.mul(private_key_bn)
-      
+
       # Create ASN1 structure for EC key
       asn1 = OpenSSL::ASN1::Sequence([
         OpenSSL::ASN1::Integer.new(1),
@@ -141,9 +141,9 @@ module Bitcoin
         OpenSSL::ASN1::ObjectId('secp256k1', 0, :EXPLICIT),
         OpenSSL::ASN1::BitString(public_key_point.to_octet_string(:uncompressed), 1, :EXPLICIT)
       ])
-      
+
       key = OpenSSL::PKey::EC.new(asn1.to_der)
-      
+
       # Verify the private key was generated correctly
       priv_hex = key.private_key.to_s(16).downcase.rjust(64, '0')
       if priv_hex != private_key_hex
@@ -381,22 +381,31 @@ module Bitcoin
 
       return false if signature.empty?
 
-      # New versions of OpenSSL will reject non-canonical DER signatures. de/re-serialize first.
-      norm_der = FFI::MemoryPointer.new(:pointer)
-      sig_ptr  = FFI::MemoryPointer.new(:pointer).put_pointer(
-        0, FFI::MemoryPointer.from_string(signature)
-      )
+      begin
+        # New versions of OpenSSL will reject non-canonical DER signatures. de/re-serialize first.
+        norm_der = FFI::MemoryPointer.new(:pointer)
+        sig_data = FFI::MemoryPointer.from_string(signature)
+        sig_ptr  = FFI::MemoryPointer.new(:pointer).put_pointer(0, sig_data)
 
-      norm_sig = d2i_ECDSA_SIG(nil, sig_ptr, signature.bytesize)
+        # Parse the DER signature
+        norm_sig = d2i_ECDSA_SIG(nil, sig_ptr, signature.bytesize)
+        return false unless norm_sig
 
-      derlen = i2d_ECDSA_SIG(norm_sig, norm_der)
-      ECDSA_SIG_free(norm_sig)
-      return false if derlen <= 0
+        # Reserialize the signature
+        temp_buf = FFI::MemoryPointer.new(:pointer)
+        derlen = i2d_ECDSA_SIG(norm_sig, temp_buf)
+        return false if derlen <= 0
 
-      ret = norm_der.read_pointer.read_string(derlen)
-      OPENSSL_free(norm_der.read_pointer)
+        # Extract the result
+        ret = temp_buf.read_pointer.read_string(derlen)
+      ensure
+        ECDSA_SIG_free(norm_sig) if norm_sig
+        OPENSSL_free(temp_buf.read_pointer) if temp_buf && !temp_buf.null? && !temp_buf.read_pointer.null?
+      end
 
       ret
+    rescue StandardError => e
+      false
     end
 
     def self.init_ffi_ssl
