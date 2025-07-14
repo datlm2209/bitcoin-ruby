@@ -11,6 +11,7 @@ module Bitcoin
       ffi_lib 'libeay32', 'ssleay32'
     else
       ffi_lib [
+        'libssl.so.3', 'libssl.3',
         'libssl.so.1.1.0', 'libssl.so.1.1',
         'libssl.so.1.0.0', 'libssl.so.10',
         'ssl'
@@ -21,9 +22,9 @@ module Bitcoin
     POINT_CONVERSION_COMPRESSED = 2
     POINT_CONVERSION_UNCOMPRESSED = 4
 
-    # OpenSSL 1.1.0 version as a numerical version value as defined in:
-    # https://www.openssl.org/docs/man1.1.0/man3/OpenSSL_version.html
+    # OpenSSL version constants
     VERSION_1_1_0_NUM = 0x10100000
+    VERSION_3_0_0_NUM = 0x30000000
 
     # OpenSSL 1.1.0 engine constants, taken from:
     # https://github.com/openssl/openssl/blob/2be8c56a39b0ec2ec5af6ceaf729df154d784a43/include/openssl/crypto.h
@@ -130,10 +131,16 @@ module Bitcoin
 
       group = OpenSSL::PKey::EC::Group.new('secp256k1')
       private_key_bn = OpenSSL::BN.new(private_key_hex, 16)
-      
+
+      # Validate private key range for OpenSSL 3.0
+      if version >= VERSION_3_0_0_NUM
+        order = OpenSSL::BN.new(group.order.to_s(16), 16)
+        return nil if private_key_bn <= 0 || private_key_bn >= order
+      end
+
       # Generate public key point by multiplying generator with private key
       public_key_point = group.generator.mul(private_key_bn)
-      
+
       # Create ASN1 structure for EC key
       asn1 = OpenSSL::ASN1::Sequence([
         OpenSSL::ASN1::Integer.new(1),
@@ -141,9 +148,9 @@ module Bitcoin
         OpenSSL::ASN1::ObjectId('secp256k1', 0, :EXPLICIT),
         OpenSSL::ASN1::BitString(public_key_point.to_octet_string(:uncompressed), 1, :EXPLICIT)
       ])
-      
+
       key = OpenSSL::PKey::EC.new(asn1.to_der)
-      
+
       # Verify the private key was generated correctly
       priv_hex = key.private_key.to_s(16).downcase.rjust(64, '0')
       if priv_hex != private_key_hex
@@ -374,7 +381,7 @@ module Bitcoin
       hex
     end
 
-    # repack signature for OpenSSL 1.0.1k handling of DER signatures
+    # repack signature for OpenSSL 1.0.1k and later handling of DER signatures
     # https://github.com/bitcoin/bitcoin/pull/5634/files
     def self.repack_der_signature(signature)
       init_ffi_ssl
@@ -387,28 +394,58 @@ module Bitcoin
         0, FFI::MemoryPointer.from_string(signature)
       )
 
-      norm_sig = d2i_ECDSA_SIG(nil, sig_ptr, signature.bytesize)
+      # Handle OpenSSL 3.0 changes in signature format
+      if version >= VERSION_3_0_0_NUM
+        begin
+          # Try to parse as DER first
+          norm_sig = d2i_ECDSA_SIG(nil, sig_ptr, signature.bytesize)
+          return false unless norm_sig
 
-      derlen = i2d_ECDSA_SIG(norm_sig, norm_der)
-      ECDSA_SIG_free(norm_sig)
-      return false if derlen <= 0
+          derlen = i2d_ECDSA_SIG(norm_sig, norm_der)
+          ECDSA_SIG_free(norm_sig)
+          return false if derlen <= 0
 
-      ret = norm_der.read_pointer.read_string(derlen)
-      OPENSSL_free(norm_der.read_pointer)
+          ret = norm_der.read_pointer.read_string(derlen)
+          OPENSSL_free(norm_der.read_pointer)
+          ret
+        rescue StandardError
+          # If DER parsing fails, return false
+          false
+        end
+      else
+        # Legacy OpenSSL behavior
+        norm_sig = d2i_ECDSA_SIG(nil, sig_ptr, signature.bytesize)
+        return false unless norm_sig
 
-      ret
+        derlen = i2d_ECDSA_SIG(norm_sig, norm_der)
+        ECDSA_SIG_free(norm_sig)
+        return false if derlen <= 0
+
+        ret = norm_der.read_pointer.read_string(derlen)
+        OPENSSL_free(norm_der.read_pointer)
+        ret
+      end
     end
 
     def self.init_ffi_ssl
       @ssl_loaded ||= false
       return if @ssl_loaded
 
-      if version >= VERSION_1_1_0_NUM
+      if version >= VERSION_3_0_0_NUM
+        # OpenSSL 3.0 initialization
+        OPENSSL_init_ssl(
+          OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_ENGINE_ALL_BUILTIN |
+          OPENSSL_INIT_ENGINE_DYNAMIC | OPENSSL_INIT_ENGINE_CRYPTODEV,
+          nil
+        )
+      elsif version >= VERSION_1_1_0_NUM
+        # OpenSSL 1.1.0 initialization
         OPENSSL_init_ssl(
           OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_ENGINE_ALL_BUILTIN,
           nil
         )
       else
+        # Legacy OpenSSL initialization
         SSL_library_init()
         ERR_load_crypto_strings()
         SSL_load_error_strings()
