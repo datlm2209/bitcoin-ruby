@@ -48,7 +48,7 @@ module Bitcoin
 
     # Generate new priv/pub key.
     def generate
-      @key.generate_key
+      @key
     end
 
     # Get the private key (in hex).
@@ -155,7 +155,7 @@ module Bitcoin
 
       version = signature.unpack('C')[0]
       return nil if version < 27 or version > 34
- 
+
       compressed = (version >= 31) ? (version -= 4; true) : false
 
       hash = Bitcoin.bitcoin_signed_message_hash(data)
