@@ -130,10 +130,10 @@ module Bitcoin
 
       group = OpenSSL::PKey::EC::Group.new('secp256k1')
       private_key_bn = OpenSSL::BN.new(private_key_hex, 16)
-      
+
       # Generate public key point by multiplying generator with private key
       public_key_point = group.generator.mul(private_key_bn)
-      
+
       # Create ASN1 structure for EC key
       asn1 = OpenSSL::ASN1::Sequence([
         OpenSSL::ASN1::Integer.new(1),
@@ -141,9 +141,9 @@ module Bitcoin
         OpenSSL::ASN1::ObjectId('secp256k1', 0, :EXPLICIT),
         OpenSSL::ASN1::BitString(public_key_point.to_octet_string(:uncompressed), 1, :EXPLICIT)
       ])
-      
+
       key = OpenSSL::PKey::EC.new(asn1.to_der)
-      
+
       # Verify the private key was generated correctly
       priv_hex = key.private_key.to_s(16).downcase.rjust(64, '0')
       if priv_hex != private_key_hex
@@ -378,16 +378,15 @@ module Bitcoin
     # https://github.com/bitcoin/bitcoin/pull/5634/files
     def self.repack_der_signature(signature)
       init_ffi_ssl
-
       return false if signature.empty?
 
-      # New versions of OpenSSL will reject non-canonical DER signatures. de/re-serialize first.
       norm_der = FFI::MemoryPointer.new(:pointer)
       sig_ptr  = FFI::MemoryPointer.new(:pointer).put_pointer(
         0, FFI::MemoryPointer.from_string(signature)
       )
 
       norm_sig = d2i_ECDSA_SIG(nil, sig_ptr, signature.bytesize)
+      return false if norm_sig.null?
 
       derlen = i2d_ECDSA_SIG(norm_sig, norm_der)
       ECDSA_SIG_free(norm_sig)
@@ -395,7 +394,6 @@ module Bitcoin
 
       ret = norm_der.read_pointer.read_string(derlen)
       OPENSSL_free(norm_der.read_pointer)
-
       ret
     end
 
